@@ -3,6 +3,7 @@ import os
 import zipfile
 import fitz  # PyMuPDF
 from PIL import Image
+from pdf2docx import Converter
 import io
 
 # Aplica tema escuro e estilo
@@ -31,6 +32,8 @@ st.title("🧰 Suite PDF - Comprimir, Converter em Word e Remover Marca d'Água"
 
 # --- Funções auxiliares ---
 def converter_pdf_para_word(pdf_path, output_path):
+    
+
     cv = Converter(pdf_path)
     cv.convert(output_path, start=0, end=None)
     cv.close()
