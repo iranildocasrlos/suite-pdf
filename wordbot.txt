@@ -1,0 +1,89 @@
+import streamlit as st
+from pdf2docx import Converter
+import os
+import zipfile
+from io import BytesIO
+
+def convert_pdf_to_word(pdf_path):
+    """Converte o arquivo PDF para DOCX usando pdf2docx"""
+    docx_path = pdf_path.replace(".pdf", ".docx")
+    cv = Converter(pdf_path)
+    cv.convert(docx_path, start=0, end=None)
+    cv.close()
+    return docx_path
+
+def convert_folder_to_word(folder_path):
+    """Converte todos os arquivos PDF em uma pasta para DOCX"""
+    pdf_files = [f for f in os.listdir(folder_path) if f.lower().endswith(".pdf")]
+    converted_files = []
+
+    for pdf_file in pdf_files:
+        pdf_path = os.path.join(folder_path, pdf_file)
+        docx_path = pdf_path.replace(".pdf", ".docx")
+        docx_path = convert_pdf_to_word(pdf_path)
+        converted_files.append(docx_path)
+    
+    return converted_files
+
+def create_zip_file(files):
+    """Cria um arquivo zip com os arquivos convertidos"""
+    zip_buffer = BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for file in files:
+            zip_file.write(file, os.path.basename(file))
+    zip_buffer.seek(0)
+    return zip_buffer
+
+def main():
+    st.title("Conversor de PDF para Word")
+
+    st.markdown("## Selecione o arquivo ou pasta PDF")
+
+    # Upload de arquivos PDF
+    uploaded_file = st.file_uploader("Selecione um arquivo PDF", type="pdf")
+    uploaded_folder = st.text_input("Ou insira o caminho de uma pasta com arquivos PDF")
+
+    if uploaded_file is not None:
+        # Salvar arquivo PDF temporariamente
+        with open("temp.pdf", "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        st.success("Arquivo PDF carregado com sucesso!")
+
+        if st.button("Converter PDF para Word"):
+            # Converter o arquivo PDF para Word
+            docx_path = convert_pdf_to_word("temp.pdf")
+            st.success(f"Arquivo convertido com sucesso! Salvo como {docx_path}")
+            with open(docx_path, "rb") as f:
+                st.download_button(
+                    label="Baixar DOCX",
+                    data=f,
+                    file_name=os.path.basename(docx_path),
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+
+    elif uploaded_folder:
+        # Verifica se a pasta contém arquivos PDF
+        folder_path = uploaded_folder
+        if os.path.isdir(folder_path):
+            st.success(f"Pasta selecionada: {folder_path}")
+
+            if st.button("Converter PDFs da Pasta"):
+                # Converter todos os PDFs da pasta para Word
+                converted_files = convert_folder_to_word(folder_path)
+                if converted_files:
+                    st.success(f"{len(converted_files)} arquivos PDF convertidos com sucesso!")
+                    
+                    # Cria o arquivo zip com os arquivos convertidos
+                    zip_file = create_zip_file(converted_files)
+
+                    st.download_button(
+                        label="Baixar arquivos convertidos em ZIP",
+                        data=zip_file,
+                        file_name="convertidos.zip",
+                        mime="application/zip"
+                    )
+                else:
+                    st.warning("Nenhum arquivo PDF encontrado na pasta.")
+
+if __name__ == "__main__":
+    main()
