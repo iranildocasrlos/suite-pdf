@@ -9,6 +9,63 @@ import pandas as pd
 import re
 import requests
 from streamlit_lottie import st_lottie
+import time
+
+
+
+
+
+ # Lista de verificações virus PDF
+# Função para verificar conteúdo do PDF (scripts, anexos, objetos)
+def verificar_malware_em_pdf(caminho_pdf):
+    resultado = {
+        "scripts_encontrados": [],
+        "anexos_suspeitos": [],
+        "obj_suspeitos": [],
+        "acoes_automaticas": [],
+        "urls_detectadas": [],
+    }
+
+    doc = fitz.open(caminho_pdf)
+
+    for page in doc:
+        # Verificar URLs
+        links = page.get_links()
+        for link in links:
+            if "uri" in link:
+                resultado["urls_detectadas"].append(link["uri"])
+
+    for i in range(len(doc)):
+        page = doc[i]
+        text = page.get_text("text")
+        if "/JS" in text or "/JavaScript" in text:
+            resultado["scripts_encontrados"].append(f"Script JavaScript encontrado na página {i+1}")
+
+    # Verificar ações automáticas
+    if "OpenAction" in doc.metadata or "/AA" in doc.metadata:
+        resultado["acoes_automaticas"].append("Ação automática detectada ao abrir o PDF")
+
+    # Verificar objetos suspeitos
+    for obj in doc:
+        if isinstance(obj, fitz.Page):
+            continue
+        obj_str = str(obj)
+        if any(palavra in obj_str for palavra in ["Launch", "EmbeddedFiles", "/AA", "/JS", "JavaScript"]):
+            resultado["obj_suspeitos"].append(f"Objeto suspeito: {obj_str[:100]}...")
+
+    return resultado
+
+
+# Função para descrever o que foi encontrado
+def descrever_item(item, tipo):
+    if tipo == "scripts":
+        return f"Script encontrado: {item}. Pode ser um script que tenta explorar vulnerabilidades conhecidas para executar código arbitrário ou roubar informações."
+    elif tipo == "anexos":
+        return f"Anexo encontrado: {item}. Anexos podem conter executáveis disfarçados ou arquivos maliciosos que tentam ser executados automaticamente."
+    elif tipo == "objetos":
+        return f"Objeto suspeito encontrado: {item}. Isso pode ser um objeto PDF embutido que tenta realizar ações inesperadas ou contém código malicioso."
+    return "Descrição não disponível."
+
 
 
 #animação de metadados
@@ -34,7 +91,7 @@ def incrementar_contador(nome_arquivo):
 
 
 # Aplica tema escuro e estilo
-st.set_page_config(page_title="Suite PDF", layout="centered")
+st.set_page_config(page_title="Suite PDF", layout="wide")
 
 st.markdown("""
     <style>
@@ -55,7 +112,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🧰 Suite PDF - Comprimir, Converter em Word e Remover Marca d'Água")
+st.title("🧰 Suite PDF - Comprimir, Converter em Word e Remover Marca d'Água, segurança e muito mais")
 
 # --- Funções auxiliares ---
 def converter_pdf_para_word(pdf_path, output_path):
@@ -113,12 +170,26 @@ def criar_zip_com_pdf(pdf_path):
     return zip_path
 
 
+# Função para carregar animação Lottie
+def load_lottieurl(url: str):
+    try:
+        response = requests.get(url)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return None
+    except Exception as e:
+        return None
+
+
+
+
 
 
 # --- Abas ---
 
 
-aba = st.tabs(["📄 PDF para Word", "💧 Remover Marca d'Água", "🗜️ Comprimir Arquivo", "🔍 Ler Metadados do PDF"])
+aba = st.tabs(["📄 PDF para Word", "💧 Remover Marca d'Água", "🗜️ Comprimir Arquivo", "🔍 Ler Metadados do PDF","🛡️ Verificar PDF Malicioso"])
 
 
 
@@ -267,3 +338,113 @@ with aba[3]:
 
             doc.close()
             os.remove("meta_temp.pdf")
+
+
+
+# --- Aba: Verificar PDF Malicioso ---
+with aba[4]:  # Verificar PDF Malicioso
+    st.header("🛡️ Verificar PDF Malicioso")
+    pdf_suspeito = st.file_uploader("Faça upload de um PDF para análise", type="pdf", key="malware_pdf")
+
+    if pdf_suspeito:
+        with st.spinner("Analisando o documento..."):
+            with open("pdf_check.pdf", "wb") as f:
+                f.write(pdf_suspeito.read())
+
+            total_testes = 5
+            progresso_geral = st.progress(0)
+            progresso_por_teste = 1 / total_testes
+
+            resultado = {
+                "scripts_encontrados": [],
+                "anexos_suspeitos": [],
+                "obj_suspeitos": [],
+                "acoes_automaticas": [],
+                "urls_detectadas": [],
+            }
+
+            doc = fitz.open("pdf_check.pdf")
+
+            # 1. Verificar JavaScript embutido
+            st.markdown("🔍 Verificando scripts embutidos (JavaScript)...")
+            st.markdown("**Explicação:** O PDF pode conter scripts JavaScript embutidos que podem ser usados para executar código malicioso no computador do usuário.")
+            barra1 = st.progress(0)
+            for i in range(len(doc)):
+                page = doc[i]
+                text = page.get_text("text")  # Alterado de "raw" para "text"
+                if "/JS" in text or "/JavaScript" in text:
+                    resultado["scripts_encontrados"].append(f"Script JavaScript encontrado na página {i+1}")
+            barra1.progress(100)
+            progresso_geral.progress(progresso_por_teste)
+
+            # 2. Verificar objetos com ações automáticas
+            st.markdown("🔍 Verificando ações automáticas (OpenAction, /AA)...")
+            st.markdown("**Explicação:** Alguns PDFs podem ter ações automáticas configuradas, como scripts que são executados quando o PDF é aberto.")
+            barra2 = st.progress(0)
+            if "OpenAction" in doc.metadata or "/AA" in str(doc.metadata):
+                resultado["acoes_automaticas"].append("Ação automática detectada ao abrir o PDF")
+            barra2.progress(100)
+            progresso_geral.progress(progresso_por_teste * 2)
+
+            # 3. Verificar URLs embutidas
+            st.markdown("🔍 Verificando links externos (URLs)...")
+            st.markdown("**Explicação:** PDFs podem conter links externos que redirecionam o usuário para sites maliciosos.")
+            barra3 = st.progress(0)
+            for page in doc:
+                links = page.get_links()
+                for link in links:
+                    if "uri" in link:
+                        resultado["urls_detectadas"].append(link["uri"])
+            barra3.progress(100)
+            progresso_geral.progress(progresso_por_teste * 3)
+
+            # 4. Verificar anexos suspeitos
+            st.markdown("🔍 Verificando anexos suspeitos...")
+            st.markdown("**Explicação:** PDFs podem ter arquivos anexados, que podem ser executáveis ou disfarçados como outros tipos de arquivos maliciosos.")
+            barra4 = st.progress(0)
+            for i in range(len(doc)):
+                anexos = doc[i].get_text("text")  # Alterado de "raw" para "text"
+                if "EmbeddedFile" in anexos:
+                    resultado["anexos_suspeitos"].append(f"Anexo suspeito na página {i+1}")
+            barra4.progress(100)
+            progresso_geral.progress(progresso_por_teste * 4)
+
+            # 5. Verificar objetos suspeitos
+            st.markdown("🔍 Verificando objetos suspeitos (Launch, EmbeddedFiles)...")
+            st.markdown("**Explicação:** Objetos maliciosos podem estar embutidos no PDF, como arquivos executáveis ou links que podem ser usados para explorar vulnerabilidades.")
+            barra5 = st.progress(0)
+            for page in doc:
+                texto = page.get_text("text")  # Alterado de "raw" para "text"
+                if any(palavra in texto for palavra in ["Launch", "EmbeddedFiles", "/AA", "/JS", "JavaScript"]):
+                    resultado["obj_suspeitos"].append(f"Objeto suspeito detectado na página {page.number + 1}")
+            barra5.progress(100)
+            progresso_geral.progress(1.0)
+
+            doc.close()
+            os.remove("pdf_check.pdf")
+
+        # Exibição dos resultados
+        st.subheader("🔍 Resultado da Análise:")
+
+        def exibir_lista_com_icone(lista, titulo, risco="baixo"):
+            if risco == "alto":
+                cor = "🔴"
+            elif risco == "médio":
+                cor = "🟡"
+            else:
+                cor = "🟢"
+
+            if lista:
+                st.markdown(f"{cor} **{titulo}**")
+                for item in lista:
+                    st.write(f"• {item}")
+            else:
+                st.markdown(f"🟢 Nenhum {titulo.lower()} encontrado.")
+
+        # Exibir resultados com ícones
+        exibir_lista_com_icone(resultado["scripts_encontrados"], "Scripts encontrados", "alto")
+        exibir_lista_com_icone(resultado["acoes_automaticas"], "Ações automáticas", "médio")
+        exibir_lista_com_icone(resultado["urls_detectadas"], "Links externos detectados", "médio")
+        exibir_lista_com_icone(resultado["anexos_suspeitos"], "Anexos suspeitos", "alto")
+        exibir_lista_com_icone(resultado["obj_suspeitos"], "Objetos suspeitos", "médio")
+
