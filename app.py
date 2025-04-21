@@ -5,6 +5,33 @@ import fitz  # PyMuPDF
 from PIL import Image
 from pdf2docx import Converter
 import io
+import pandas as pd
+import re
+import requests
+from streamlit_lottie import st_lottie
+
+
+#animação de metadados
+def load_lottie_url(url: str):
+    r = requests.get(url)
+    if r.status_code != 200:
+        return None
+    return r.json()
+
+
+def incrementar_contador(nome_arquivo):
+    if not os.path.exists(nome_arquivo):
+        with open(nome_arquivo, "w") as f:
+            f.write("0")
+    with open(nome_arquivo, "r+") as f:
+        valor = int(f.read())
+        valor += 1
+        f.seek(0)
+        f.write(str(valor))
+        f.truncate()
+    return valor
+
+
 
 # Aplica tema escuro e estilo
 st.set_page_config(page_title="Suite PDF", layout="centered")
@@ -85,12 +112,22 @@ def criar_zip_com_pdf(pdf_path):
         zipf.write(pdf_path, arcname=os.path.basename(pdf_path))
     return zip_path
 
+
+
+
 # --- Abas ---
-aba = st.tabs(["📄 PDF para Word", "💧 Remover Marca d'Água", "🗜️ Comprimir Arquivo"])
+
+
+aba = st.tabs(["📄 PDF para Word", "💧 Remover Marca d'Água", "🗜️ Comprimir Arquivo", "🔍 Ler Metadados do PDF"])
+
+
+
 
 # --- Aba 1: PDF para Word ---
 with aba[0]:
+   
     st.header("📄 Converter PDF para Word")
+    
     uploaded_pdf = st.file_uploader("Faça upload de um arquivo PDF", type="pdf")
     if uploaded_pdf:
         with st.spinner("Convertendo PDF para DOCX..."):
@@ -102,6 +139,10 @@ with aba[0]:
                 st.download_button("📥 Baixar Word", f, file_name="convertido.docx")
             os.remove("temp.pdf")
             os.remove("output.docx")
+
+             # Mostra contador
+        total = incrementar_contador("contador.txt")
+        st.info(f"📊 Total de conversões já realizadas: {total}")
 
 # --- Aba 2: Remover Marca d'Água ---
 with aba[1]:
@@ -119,6 +160,10 @@ with aba[1]:
                 st.download_button("📥 Baixar PDF sem marca", f, file_name="sem_marca.pdf")
             os.remove("marca.pdf")
             os.remove("sem_marca.pdf")
+
+             # Mostra contador
+        total = incrementar_contador("contador.txt")
+        st.info(f"📊 Total de conversões já realizadas: {total}")
 
 # --- Aba 3: Comprimir Arquivo ---
 with aba[2]:
@@ -139,3 +184,86 @@ with aba[2]:
             os.remove("temp_input.pdf")
             os.remove(pdf_comprimido)
             os.remove(zip_file)
+
+             # Mostra contador
+        total = incrementar_contador("contador.txt")
+        st.info(f"📊 Total de conversões já realizadas: {total}")
+
+
+# --- Aba 4: Metadados do PDF ---
+# --- Aba 4: Metadados do PDF ---
+with aba[3]:
+
+    st.header("📋 Ler Metadados do PDF")
+    
+    uploaded_meta_pdf = st.file_uploader("Envie um PDF para extrair metadados", type="pdf", key="metadata")
+
+    if uploaded_meta_pdf:
+
+         # 🔄 Exibe animação enquanto processa
+        lottie_url = "https://assets1.lottiefiles.com/packages/lf20_3ntisyac.json"
+        lottie_animation = load_lottie_url(lottie_url)
+        with st.spinner("Lendo metadados do PDF..."):
+            if lottie_animation:
+                st_lottie(lottie_animation, height=200)
+    
+    # Aqui entra sua lógica de leitura de metadados
+        with st.spinner("Lendo metadados..."):
+            with open("meta_temp.pdf", "wb") as f:
+                f.write(uploaded_meta_pdf.read())
+
+            doc = fitz.open("meta_temp.pdf")
+            info = doc.metadata
+
+            # Tentativa robusta de identificação do autor
+            autor = info.get("author") or info.get("Author") or "Não encontrado"
+
+            # Busca por possíveis coordenadas (latitude/longitude) no conteúdo
+            lat_lon = None
+            for page in doc:
+                text = page.get_text()
+                matches = re.findall(r"([-+]?\d{1,2}\.\d+)[, ]+([-+]?\d{1,3}\.\d+)", text)
+                for lat, lon in matches:
+                    try:
+                        lat_f, lon_f = float(lat), float(lon)
+                        if -90 <= lat_f <= 90 and -180 <= lon_f <= 180:
+                            lat_lon = (lat_f, lon_f)
+                            break
+                    except:
+                        continue
+                if lat_lon:
+                    break
+
+            info_extra = {
+                "Autor (detectado)": autor,
+                "Número de páginas": doc.page_count,
+                "Permissões": doc.permissions,
+                "Protegido com senha": doc.is_encrypted,
+                "Tamanho do arquivo (bytes)": os.path.getsize("meta_temp.pdf"),
+                "Tem anotações": any(p.annots() for p in doc),
+                "Tem formulários": any(p.widgets() for p in doc),
+                "Fontes usadas": list(set(font[3] for page in doc for font in page.get_fonts(full=True))),
+            }
+
+            if lat_lon:
+                coord_str = f"{lat_lon[0]}, {lat_lon[1]}"
+                maps_url = f"https://www.google.com/maps?q={coord_str}"
+                info_extra["Coordenadas detectadas (Lat, Lon)"] = f"[{coord_str}]({maps_url})"
+            else:
+                info_extra["Coordenadas detectadas (Lat, Lon)"] = "Não encontrado"
+
+            # Combinar metadados principais e extras
+            all_metadata = {**info, **info_extra}
+
+            # Mostrar no app
+            st.subheader("Metadados Detalhados")
+            for chave, valor in all_metadata.items():
+                st.markdown(f"**{chave}:** {valor}")
+
+            # Exportar CSV
+            df_meta = pd.DataFrame(list(all_metadata.items()), columns=["Campo", "Valor"])
+            csv_bytes = df_meta.to_csv(index=False).encode("utf-8")
+            st.download_button("📥 Baixar Metadados (.csv)", data=csv_bytes, file_name="metadados.csv", mime="text/csv")
+
+            doc.close()
+            os.remove("meta_temp.pdf")
