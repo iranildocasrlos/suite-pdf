@@ -189,7 +189,15 @@ def load_lottieurl(url: str):
 # --- Abas ---
 
 
-aba = st.tabs(["📄 PDF para Word", "💧 Remover Marca d'Água", "🗜️ Comprimir Arquivo", "🔍 Ler Metadados do PDF","🛡️ Verificar PDF Malicioso"])
+aba = st.tabs([
+    "📄 PDF para Word",
+    "💧 Remover Marca d'Água",
+    "🗜️ Comprimir Arquivo",
+    "🔍 Ler Metadados do PDF",
+    "🛡️ Verificar PDF Malicioso",
+    "📚 PDF para eBook"
+])
+
 
 
 
@@ -448,3 +456,145 @@ with aba[4]:  # Verificar PDF Malicioso
         exibir_lista_com_icone(resultado["anexos_suspeitos"], "Anexos suspeitos", "alto")
         exibir_lista_com_icone(resultado["obj_suspeitos"], "Objetos suspeitos", "médio")
 
+# --- Aba 6: PDF para eBook (ePub) ---
+with aba[5]:
+    st.header("📚 Converter PDF para eBook (ePub)")
+
+    uploaded_pdf_ebook = st.file_uploader("Envie um arquivo PDF para converter em ePub", type="pdf", key="ebook")
+
+    if uploaded_pdf_ebook:
+        with st.spinner("Convertendo PDF em eBook com capa, capítulos, imagens e índice..."):
+            import shutil
+            from ebooklib import epub
+            from PIL import Image, ImageDraw, ImageFont
+
+            with open("ebook_temp.pdf", "wb") as f:
+                f.write(uploaded_pdf_ebook.read())
+
+            doc = fitz.open("ebook_temp.pdf")
+            book = epub.EpubBook()
+            book.set_identifier("id123456")
+            book.set_title("eBook Convertido")
+            book.set_language("pt-BR")
+            book.add_author("Autor Desconhecido")
+
+            os.makedirs("temp_images", exist_ok=True)
+            chapters = []
+            capa_definida = False
+
+            for i, page in enumerate(doc):
+                text = page.get_text()
+                html_content = ""
+
+                # Detecta título da seção
+                title_match = re.search(r"(Prólogo|Cap(ítulo)?\.?\s*\d+|Epílogo|Introdução|Conclusão)", text, re.IGNORECASE)
+                title = title_match.group(0).strip().title() if title_match else f"Página {i+1}"
+
+                html_content += f"<h2>{title}</h2>"
+                html_content += f"<p>{text.replace(chr(10), '<br>')}</p>"
+
+                # Extrai imagens da página
+                images = page.get_images(full=True)
+                for img_index, img in enumerate(images):
+                    xref = img[0]
+                    base_image = doc.extract_image(xref)
+                    image_bytes = base_image["image"]
+                    image_ext = base_image["ext"]
+
+                    image_name = f"image_{i+1}_{img_index+1}.{image_ext}"
+                    image_path = os.path.join("temp_images", image_name)
+
+                    with open(image_path, "wb") as img_file:
+                        img_file.write(image_bytes)
+
+                    # ✅ CAPA personalizada na primeira imagem da página 1
+                    if i == 0 and not capa_definida:
+                        try:
+                            img_pil = Image.open(image_path).convert("RGB")
+                            draw = ImageDraw.Draw(img_pil)
+
+                            try:
+                                font_title = ImageFont.truetype("arial.ttf", size=48)
+                                font_author = ImageFont.truetype("arial.ttf", size=32)
+                            except:
+                                font_title = ImageFont.load_default()
+                                font_author = ImageFont.load_default()
+
+                            titulo = "eBook Convertido"
+                            autor = "Autor Desconhecido"
+
+                            W, H = img_pil.size
+                            draw.text((W / 2, H / 1.5), titulo, fill="white", font=font_title, anchor="mm")
+                            draw.text((W / 2, H / 1.4 + 50), f"por {autor}", fill="white", font=font_author, anchor="mm")
+
+                            img_pil.save("capa_final.jpg", "JPEG")
+                            with open("capa_final.jpg", "rb") as capa_file:
+                                book.set_cover("capa_final.jpg", capa_file.read())
+
+                            capa_definida = True
+                            continue  # Não adicionar essa imagem no conteúdo
+                        except Exception as e:
+                            st.warning(f"Erro ao gerar capa personalizada: {e}")
+                            continue
+
+                    # Adiciona imagem ao conteúdo normalmente
+                    with open(image_path, "rb") as img_file:
+                        img_item = epub.EpubItem(
+                            uid=image_name,
+                            file_name=f"images/{image_name}",
+                            media_type=f"image/{image_ext}",
+                            content=img_file.read()
+                        )
+                        book.add_item(img_item)
+                        html_content += f'<div><img src="images/{image_name}" style="max-width: 100%;"/></div>'
+
+                chapter = epub.EpubHtml(title=title, file_name=f"page_{i+1}.xhtml", lang="pt-BR")
+                chapter.content = html_content
+                book.add_item(chapter)
+                chapters.append(chapter)
+
+            # Criar TOC (índice) estruturado em seções
+            book.spine = ['nav']
+            toc_secoes = {}
+            for chapter in chapters:
+                titulo = chapter.title.strip()
+                match = re.search(r"(Prólogo|Cap(ítulo)?\s*\d+|Epílogo|Introdução|Conclusão)", titulo, re.IGNORECASE)
+                secao = match.group(0).title() if match else "Outros"
+
+                if secao not in toc_secoes:
+                    toc_secoes[secao] = []
+                toc_secoes[secao].append(chapter)
+                book.spine.append(chapter)
+
+            # Estrutura final de índice clicável
+            toc_final = []
+            for secao, capitulos in toc_secoes.items():
+                toc_final.append(epub.Section(secao, capitulos))
+            book.toc = tuple(toc_final)
+
+            # Adiciona navegação e estilo
+            book.add_item(epub.EpubNcx())
+            book.add_item(epub.EpubNav())
+            style = 'BODY { font-family: Arial; padding: 10px; }'
+            nav_css = epub.EpubItem(uid="style_nav", file_name="style/nav.css", media_type="text/css", content=style)
+            book.add_item(nav_css)
+
+            epub_path = "saida.epub"
+            epub.write_epub(epub_path, book)
+
+            st.success("📘 eBook gerado com capa personalizada, índice clicável e capítulos automáticos!")
+
+            with open(epub_path, "rb") as f:
+                st.download_button("📥 Baixar eBook (.epub)", f, file_name="ebook_convertido.epub")
+
+            # Limpeza
+            doc.close()
+            os.remove("ebook_temp.pdf")
+            os.remove("saida.epub")
+            if os.path.exists("capa_final.jpg"):
+                os.remove("capa_final.jpg")
+            shutil.rmtree("temp_images", ignore_errors=True)
+
+            # Contador
+            total = incrementar_contador("contador.txt")
+            st.info(f"📊 Total de conversões já realizadas: {total}")
