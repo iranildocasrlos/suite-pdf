@@ -10,6 +10,8 @@ import re
 import requests
 from streamlit_lottie import st_lottie
 import time
+# Gráfico
+import matplotlib.pyplot as plt
 
 
 
@@ -598,3 +600,48 @@ with aba[5]:
             # Contador
             total = incrementar_contador("contador.txt")
             st.info(f"📊 Total de conversões já realizadas: {total}")
+
+
+
+
+
+def registrar_acesso_com_log(arquivo_csv="log_acessos.csv"):
+    from datetime import datetime
+    agora = datetime.now()
+    data = agora.strftime("%Y-%m-%d")
+    hora = agora.strftime("%H:%M:%S")
+
+    # Cria o CSV se não existir
+    if not os.path.exists(arquivo_csv):
+        with open(arquivo_csv, "w") as f:
+            f.write("data,hora\n")
+
+    # Registra o acesso
+    with open(arquivo_csv, "a") as f:
+        f.write(f"{data},{hora}\n")
+
+    # Lê total de acessos
+    df = pd.read_csv(arquivo_csv)
+    return len(df), df
+
+
+total_acessos, df_acessos = registrar_acesso_com_log()
+
+st.markdown(f"<p style='text-align:right; color:#888;'>👁️ Este site já foi acessado <strong>{total_acessos}</strong> vezes.</p>", unsafe_allow_html=True)
+
+
+# st.subheader("📊 Acessos por Dia")
+
+# # Agrupa acessos por data
+# df_por_dia = df_acessos['data'].value_counts().sort_index()
+# df_por_dia = df_por_dia.rename_axis("Data").reset_index(name="Acessos")
+
+
+
+# fig, ax = plt.subplots()
+# ax.plot(df_por_dia["Data"], df_por_dia["Acessos"], marker='o')
+# ax.set_xlabel("Data")
+# ax.set_ylabel("Nº de acessos")
+# ax.set_title("Acessos ao Site por Dia")
+# plt.xticks(rotation=45)
+# st.pyplot(fig)
